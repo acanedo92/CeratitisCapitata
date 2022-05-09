@@ -1,0 +1,910 @@
+\documentclass[a4paper]{scrartcl}
+\usepackage{lscape}
+\usepackage[section]{placeins}
+\usepackage{rotating}
+\usepackage[margin=1.0in]{geometry}
+\usepackage[table]{xcolor}
+\usepackage[hidelinks]{hyperref}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\topfraction}{0.8}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\floatpagefraction}{0.75}
+\begin{document}
+
+\title{A Population Genetic Report}
+
+<<echo=FALSE,results='hide'>>=
+ip <- installed.packages()
+ver <- ip[which(ip[,1]=="PopGenReport"),"Version"]
+@
+<<echo=FALSE, results='asis'>>=
+cat(paste("\\subtitle {using PopGenReport Version ",ver,"}\n"))
+@
+\author{Adamack \& Gruber}
+\maketitle
+
+\begin{itemize}
+  \item Adamack, A. T., Gruber, B. (2014), PopGenReport: simplifying basic population genetic analyses in R. \emph{Methods in Ecology and Evolution}, 5: 384-387. \href{http://onlinelibrary.wiley.com/doi/10.1111/2041-210X.12158/full}{doi: 10.1111/2041-210X.12158}.
+  \item Gruber, B. and Adamack, A. T. (2015), landgenreport: a new r function to simplify landscape genetic analysis using resistance surface layers. \emph{Molecular Ecology Resources}, 15: 1172-1178. \href{http://onlinelibrary.wiley.com/doi/10.1111/1755-0998.12381/full}{doi: 10.1111/1755-0998.12381}.
+\end{itemize}
+
+
+%<<echo=FALSE, results='asis'>>=
+%rref <- citation("PopGenReport")
+%print(rref[1], style="latex")
+%@
+  
+%<<echo=FALSE, results='asis'>>=
+%print(rref[2], style="latex")
+%@
+
+\tableofcontents
+\newpage
+
+<<echo=FALSE,results='hide', message=FALSE>>=
+suppressPackageStartupMessages(library(RgoogleMaps))
+suppressPackageStartupMessages(library(adegenet))
+suppressPackageStartupMessages(library(ade4))
+suppressPackageStartupMessages(library(pegas))
+suppressPackageStartupMessages(library(genetics))
+suppressPackageStartupMessages(library(gap))
+suppressPackageStartupMessages(library(lattice))
+suppressPackageStartupMessages(library(calibrate))
+suppressPackageStartupMessages(library(xtable))
+suppressPackageStartupMessages(library(plyr))
+suppressPackageStartupMessages(library(mmod))
+suppressPackageStartupMessages(library(dismo))
+suppressPackageStartupMessages(library(R.utils))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(reshape))
+suppressPackageStartupMessages(library(gdistance))
+suppressPackageStartupMessages(library(vegan))
+suppressPackageStartupMessages(library(sp))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(raster))
+suppressPackageStartupMessages(library(GGally))
+suppressPackageStartupMessages(library(hierfstat))
+suppressPackageStartupMessages(library(data.table))
+options(width = 80)
+
+#global functions and parameters....
+brtab <- function(mat,capt,rown, width=9)
+{
+
+n.entry<- dim(t(mat))[2]
+tab <- t(mat)
+pta <- matrix(NA,ncol=min(width,n.entry), nrow=2*ceiling(n.entry/width))
+for (i in 1:n.entry)
+{
+pta[2*(floor((i-1)/width)+1),((i-1) %% width)+1] <- tab[i]
+pta[2*(floor((i-1)/width)+1)-1,((i-1) %% width)+1] <- colnames(tab)[i]
+}
+
+
+pta <- cbind(rep(rown,ceiling(n.entry/width)),pta)
+
+
+print(xtable(pta,  cap=capt), add.to.row=list(list(seq(1,2*ceiling(n.entry/width),2)),"\\rowcolor[gray]{0.9} "), include.rownames=FALSE, include.colnames=FALSE, hline.after=c(0,nrow(pta)))
+}
+
+#long table break
+breaktab <- function(tab, cap_first, cap_cont)
+{
+num_tables<-ceiling(dim(tab)[2]/8)
+for(i in 1:num_tables){
+  if(i==1) {
+    tempcap<-cap_first
+  } else if (i>1) {
+    tempcap<-cap_cont
+  }
+  firstcol<-1+(8*(i-1))
+  lastcol<-i*8
+  if(lastcol>dim(tab)[2]) lastcol<-dim(tab)[2]
+  tempdata2<-as.matrix(tab[,firstcol:lastcol])
+  if((lastcol-firstcol)==0) colnames(tempdata2)<-colnames(tab)[dim(tab)[2]]
+  tab2<-xtable(tempdata2,cap=tempcap, digits=3)
+  print(tab2,include.rownames=TRUE, ,add.to.row=list(list(seq(1,nrow(tab2),2)),"\\rowcolor[gray]{0.9} ")) 
+}
+}
+
+
+#initial calculations
+sumcats<-summary(cats)
+samplocnum<-sumcats$n.by.pop
+filename<-cats@other$filename
+allresults<-list()
+
+
+#figure parameters....
+fig.path <- paste(cats@other$filename,"-",sep="")
+dev <- c('pdf', 'png','svg')
+dpi <- 300
+@
+\section{Counts}
+<<echo=FALSE,results='asis'>>=
+cat(paste("This analysis looks at ",sumcats$n," individuals.",sep=""))
+@
+
+\noindent
+\newline The mean number of alleles per locus (across all locations): \Sexpr{round(mean(sumcats$loc.n.all),1)}
+
+
+\noindent
+\newline The percentage of missing data was \Sexpr{round(sumcats$NA.perc,1)}\%.
+
+<<n_alleles_per_locus, echo=FALSE, fig.width=6, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi>>=
+barplot(sumcats$loc.n.all,ylab="Number of alleles", main="Number of alleles per locus",xlab="Locus",ylim=c(0,round((5+max(sumcats$loc.n.all)),digits=-1)),las=3,names.arg=locNames(cats), cex.names=0.8)
+@
+\FloatBarrier
+
+
+
+\noindent 
+\newline The individuals were sampled from the following locations in the following numbers: 
+<<echo=FALSE, results='hide'>>=
+indlist<-as.data.frame(samplocnum)
+colnames(indlist)<-"Number"
+#t(indlist)
+popallelecnt<-sum(sumcats$loc.n.all)
+indlist.out<-data.frame(Locations=rownames(indlist),Number=indlist[,1])
+colnames(indlist.out)<-c("Location","Number")
+write.csv(indlist.out, file=paste(filename,"-num_samp_by_loc.csv", sep=""), row.names=FALSE)
+@
+
+<<echo=FALSE, results='asis'>>=
+brtab(indlist, capt="Number of individuals per population", c("population","# ind"))
+@
+
+\noindent
+\newline {The total number of alleles sampled across all locations was {\Sexpr{popallelecnt}}} 
+\newline The total number of alleles seen in each sampling location was:
+
+
+<<echo=FALSE, results='hide'>>=
+numallelespop<-as.data.frame(sumcats$pop.n.all)
+rownames(numallelespop)<-popNames(cats)
+colnames(numallelespop)<-"Total number of alleles"
+#t(numallelespop)
+numallelespop.out<-data.frame(Locations=rownames(numallelespop),numallelespop[,1])
+colnames(numallelespop.out)[2]<-"Total number of alleles"
+write.csv(numallelespop.out, paste(filename,"-tot_alleles_by_loc.csv", sep=""),row.names=FALSE)
+@
+<<echo=FALSE, results='asis'>>=
+brtab(numallelespop,"Number of alleles per population",c("population","# alleles"))
+@
+<<pop_sampsz_vs_alleles, echo=FALSE, fig.width=6, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi>>=
+plot(sumcats$n.by.pop,sumcats$pop.n.all,xlab="Location sample size",ylab="Number of alleles",main="Number of alleles vs location sample size",pch=19,ylim=c(0,round((5+max(sumcats$pop.n.all)),digits=-1)))
+textxy(sumcats$n.by.pop,sumcats$pop.n.all,(names(sumcats$pop.n.all)),cex=0.6)
+@
+\FloatBarrier
+\noindent
+\newline The number of alleles per locus (across all subpopulations):
+<<echo=FALSE, results='asis'>>=
+numatall<-as.data.frame(t(sumcats$loc.n.all))
+colnames(numatall)<-locNames(cats)
+rownames(numatall)<-"# of alleles"
+
+row1<-c("Locus",colnames(numatall))
+row2<-unname(unlist(c("# of alleles",numatall[1,])))
+numatall.out<-rbind(row1,row2)
+write.table(numatall.out, paste(filename,"-num_alleles_locus.csv", sep=""), row.names=FALSE, col.names=FALSE, sep=",")
+@
+
+<<echo=FALSE, results='asis'>>=
+brtab((t(numatall)),"Number of alleles per locus across all subpopulations",c("locus","# alleles"),7)
+@
+
+
+
+
+<<echo=FALSE,results='hide'>>=
+allresults$counts<-list(N=sumcats$N, numbypop=t(indlist),totalleles=popallelecnt, nallelesbypop=t(numallelespop), nallelesbyloc=numatall, meanalleles=round(mean(sumcats$loc.n.all),1),missing=round(sumcats$NA.perc,1))
+@
+
+\FloatBarrier
+\section{Population-wide test for heterozygosity}
+
+\noindent
+
+<<echo=FALSE, results='hide'>>=
+het_obs<-as.data.frame(t(sumcats$Hobs))
+rownames(het_obs)<-"Observed"
+colnames(het_obs)<-locNames(cats)
+het_obs<-as.data.frame(t(het_obs))
+het_obs$Locus<-rownames(het_obs)
+
+het_exp<-as.data.frame(t(sumcats$Hexp))
+rownames(het_exp)<-"Expected"
+colnames(het_exp)<-locNames(cats)
+het_exp<-as.data.frame(t(het_exp))
+het_exp$Locus<-rownames(het_exp)
+
+het_comb<-merge(het_exp,het_obs,by="Locus")
+het_comb[,4]<-(het_comb[,2]-het_comb[,3])/het_comb[,2]*100
+colnames(het_comb)[4]<-"% difference"
+pop_het_table<-xtable(het_comb, cap="The population-wide expected and observed heterozygosity and percent difference ((E-O)/E*100) at each locus",digits=3)
+write.csv(het_comb, paste(cats@other$filename,"-exp_obs_hz.csv", sep=""), row.names=TRUE)
+@
+
+
+<<echo=FALSE,results='asis'>>=
+print(pop_het_table,include.rownames=FALSE, add.to.row=list(list(seq(1,nrow(het_comb),2)),"\\rowcolor[gray]{0.9} "))
+
+# for future iterations consider replacing with the tests located here:
+# http://www.sph.umich.edu/csg/abecasis/Exact/index.html
+popbart<-bartlett.test(list(sumcats$Hexp,sumcats$Hobs))
+@
+\noindent
+Bartlett test of homogeneity of variance. This test compares observed vs. expected heterozygosity. A significant result indicates that the population departs from HWE. \\
+Bartlett's K-squared: \Sexpr{round(popbart$statistic,3)}, df = \Sexpr{popbart$parameter[[1]]}, p-value = \Sexpr{round(popbart$p.value,digits=4)}
+
+<<echo=FALSE, results='hide'>>=
+allresults$locihz<-list(obs_exp_het_comp=het_comb, Bartlett_test=popbart)
+@
+
+\FloatBarrier
+\section{Distribution of alleles by subpopulation and loci}
+\subsection{Allele frequency plots for all subpopulations and loci}
+
+<<echo=FALSE, results='hide',warning=FALSE>>=
+numloci<-length(locNames(cats))
+freq_alleles<-allele.dist(cats, mk.figures=FALSE)
+breaks<-seq(0,1,.05)
+color.palette  <- colorRampPalette(c("yellow", "red"))(length(breaks) - 1)
+
+@ 
+\FloatBarrier
+<<allelfreq, echo=FALSE, fig.width=7, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi,fig.show='as.is'>>=
+
+for (i in 1:numloci)
+{
+    nr <- nrow(freq_alleles[[2]][[i]])
+    nc <- ncol(freq_alleles[[2]][[i]])
+    mp<-  barplot(freq_alleles[[2]][[i]], beside=TRUE, border=NA, ylim=c(0,1.1), main=paste("Loci: ",locNames(cats)[i]," # ",i,sep=""), col=rainbow(nrow(freq_alleles[[2]][[i]])), axes=FALSE, space=c(0,2), names.arg=rep(NA,nc), las=2, cex.axis=0.8 )
+    # axis(1, labels=TRUE, tick=FALSE, las=2)
+    text(colMeans(mp, na.rm=TRUE),rep(1.05,nc),colnames(freq_alleles[[2]][[i]]))
+    labs <- rownames(freq_alleles[[2]][[i]] )
+    axis(1, at=seq(1,max(mp)+nr,nr+2), labels=FALSE, tick=TRUE, las=2, tck=0)
+    abline(v=seq(1,max(mp)+nr,nr+2), lty=2)
+    axis(1, at=mp, labels=rep(labs, nc), las=2 ,tick=FALSE,tck= -0.02, line=-0.5)
+    axis(2)
+}  
+@
+\FloatBarrier 
+\subsection{Heatmaps of allele frequencies for all subpopulation and loci}
+Cell colors indicate the proportion of the the total number of alleles in a subpopulation (e.g. 2N) that are of a particular allele type. The numbers within a cell are the counts of the number of alleles in a particular population.  
+
+
+\FloatBarrier
+<<keyall, echo=FALSE, fig.width=6, fig.height=2, fig.path=fig.path, dev=dev, dpi=dpi, fig.cap="Color indicates the proportion of the total number of alleles in a subpopulation", warning=FALSE, fig.show='as.is'>>=
+barplot(rep(1,20), col=color.palette, axes=FALSE,space=0, border=NA, main="Colour key for allele frequencies" )
+axis(1, seq(0,20,1), seq(0,100, 5))  
+@
+
+\FloatBarrier
+<<heatmap, warning=FALSE, echo=FALSE,  fig.width=7, fig.height=5, fig.path=fig.path, dev=dev, dpi=dpi>>=
+
+numloci<-length(locNames(cats))
+for (i in 1:numloci)
+{
+  if(unname(cats@loc.n.all[i])>1){
+    figlabel<-paste("Loci: ",locNames(cats)[i]," # ",i,sep="")
+    dat <- t(freq_alleles[[2]][[i]])
+    dat <- dat[,seq(ncol(dat),1,-1)]
+    counts <- t(freq_alleles[[1]][[i]])
+    counts <- counts[,seq(ncol(counts),1,-1)]
+    
+    image( dat, col=color.palette, axes=FALSE, main=figlabel, zlim=c(0,1))
+    rn <- rownames(dat)
+    cn <- colnames(dat)  
+    axis(1, at = seq(0,1,len=nrow(dat)),labels=rn, cex.axis= max(1-nrow(dat)/100,0.5), las=2 )
+    axis(2, at = seq(0,1,len=ncol(dat)),labels=cn , las=2, cex.axis= max(1-ncol(dat)/100,0.5))
+    box()
+    co <- expand.grid(seq(0,1,len=nrow(dat)),seq(0,1,len=ncol(dat)))
+    text(co[,1], co[,2],counts, cex=max(0.5,min(1-nrow(dat)/100, 1-ncol(dat)/100)))
+##test of filled.contour
+#     plot.new()
+#    plot.window(xlim=c(0,1), ylim=c(0,1))
+#    title(main= figlabel)
+#                                                  
+#
+#  .filled.contour( seq(0,1,len=nrow(dat)), seq(0,1,len=ncol(dat)), z=dat, col=color.palette, levels= seq(0,1,0.05))
+#   axis(1, at = seq(0,1,len=nrow(dat)),labels=rn, cex.axis= max(1-nrow(dat)/100,0.5), line=FALSE)
+#   axis(2, at = seq(0,1,len=ncol(dat)),labels=cn , las=2, cex.axis= max(1-ncol(dat)/100,0.5), line=FALSE)
+  } else 
+    {
+    warning("Locus ",unname(locNames(cats)[i])," has only ",unname(cats@loc.n.all[i])," allele, figure not made \n")
+  }
+}
+@
+\FloatBarrier
+
+\subsection{Private Alleles}
+<<echo=FALSE, results='hide'>>=
+pa<-freq_alleles$private.alleles
+noprivate.allel=TRUE
+tempcount<-0
+for(i in 1:length(pa)){
+  if(!is.na(pa[[i]][1])){
+ noprivate.allel=FALSE
+    if(tempcount==0){
+      if(is.null(dim(pa[[i]]))){
+        patemp<-cbind(unname(locNames(cats))[i],as.matrix(t(pa[[i]])))
+        colnames(patemp)[1]<-"Locus"
+        privall<-patemp
+      } else if (!is.null(dim(pa[[i]]))){
+        patemp<-cbind(unname(locNames(cats))[i],pa[[i]])
+        colnames(patemp)[1]<-"Locus"
+        privall<-patemp
+      }
+    } else if (tempcount>0){
+      if(is.null(dim(pa[[i]]))){
+        patemp<-cbind(unname(locNames(cats))[i],as.matrix(t(pa[[i]])))
+        colnames(patemp)[1]<-"Locus"
+        privall<-rbind(privall,patemp)
+      } else if (!is.null(dim(pa[[i]]))){
+        patemp<-cbind(unname(locNames(cats))[i],pa[[i]])
+        colnames(patemp)[1]<-"Locus"
+        privall<-rbind(privall,patemp)
+      }      
+    }
+    tempcount<-tempcount+1
+  }
+}
+if (noprivate.allel==TRUE)
+{
+privall <-  data.frame(Locus="-",Population="-", Allele="-")
+mat.priv.all <- data.frame(Population="-")
+} else
+{
+mat.priv.all<-as.matrix(t(table(privall[,2])))
+} 
+rownames(mat.priv.all)<-"Number of private alleles"
+
+@
+\FloatBarrier
+\subsubsection{All private alleles}
+<<echo=FALSE, results='asis'>>=
+print(xtable(privall,c("List of private alleles by locus and population")),include.rownames=FALSE)
+write.table(privall, paste(filename,"-all_private_alleles.csv", sep=""), row.names=FALSE, col.names=TRUE, sep=",")
+@
+\FloatBarrier
+\subsubsection{Number of private alleles by population}
+<<echo=FALSE, results='asis'>>=
+print(xtable(mat.priv.all,c("Number of private alleles by population")))
+write.csv(mat.priv.all, paste(filename,"-num_priv_allele_pop.csv", sep=""))
+@
+
+\FloatBarrier
+<<echo=FALSE, results='hide'>>=
+allresults$allele.dist<-list(frequencies=freq_alleles[[2]], count=freq_alleles[[1]], priv.allele=freq_alleles[[3]])
+@
+\FloatBarrier
+
+\FloatBarrier
+\section{Calculation of F statistics for each locus across all sampling locations}
+<<echo=FALSE, results='hide'>>=
+# Calculate Fst values for each loci
+FST_results<-Fst(as.loci(cats),pop=cats@pop)
+#FST_results_table<-xtable(t(FST_results),caption="FST statistics for each locus across all locations")
+FST_results<-as.data.frame(FST_results)
+FST_results<-FST_results[order(FST_results$Fst),]
+FSTfigset<-as.data.frame(FST_results)
+FSTfigset<-FSTfigset[order(FSTfigset$Fst),]
+FSTplot<-as.data.frame(FSTfigset$Fst)
+rownames(FSTplot)<-rownames(FSTfigset)
+colnames(FSTplot)<-"Fst"
+tab_pop_Fst<-xtable(FST_results,caption="Population wide Fit, Fst, and Fst values for each locus. The table is sorted in ascending order based on Fst.",digits=4)
+write.csv(FST_results, paste(cats@other$filename,"-Fst_by_loc.csv", sep=""), row.names=TRUE)
+@
+
+<<echo=FALSE,results='asis'>>=
+print(tab_pop_Fst,include.rownames=TRUE,add.to.row=list(list(seq(1,nrow(FST_results),2)),"\\rowcolor[gray]{0.9} "))
+@
+
+<<pop_locus_fst, echo=FALSE, fig.width=6, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi, fig.cap="Fst across entire population at each locus. Solid line shows median Fst, dotted line shows mean Fst, dashed lines indicate 2.5th and 97.5th percentiles of Fst">>=
+  barplot(FST_results$Fst, ylim=c(0,signif(max(FST_results$Fst),1)), names.arg=rownames(FST_results), las=3,ylab="Fst", cex.names=0.8)
+  percentiles<-quantile(FST_results$Fst,probs=c(0.025,0.5,0.975))
+  abline(a=percentiles[1],b=0,lty=2)
+  abline(a=percentiles[2],b=0,lty=1)
+  abline(a=percentiles[3],b=0,lty=2)
+  abline(a=mean(FST_results$Fst),b=0,lty=3)
+@
+\FloatBarrier
+
+\section{Computation of Nei's pairwise Fst between all pairs of populations}
+<<echo=FALSE, results='hide'>>=
+# this step recreates table 3 in Goosens (but still need statistical tests)
+# calculates all pairwise Fst values
+mat.fst <- pairwise.fst(cats, res.type="matrix")
+#for testing purposes
+#mat.fst <-as.matrix(dist(cbind(runif(85),runif(85))))
+mat.fst[upper.tri(mat.fst)]<-NA
+
+write.csv(mat.fst, paste(cats@other$filename,"-pairwise_Fst.csv", sep=""), row.names=TRUE)
+
+tab_pairwise_fst<-xtable(mat.fst,caption="Nei's pairwise Fst between all pairs of populations",digits=3)
+@
+
+
+
+<<echo=FALSE,results='asis'>>=
+
+if (dim(mat.fst)[1]<13) print(tab_pairwise_fst,include.rownames=TRUE, add.to.row=list(list(seq(1,nrow(mat.fst),2)),"\\rowcolor[gray]{0.9} "))  else
+print(tab_pairwise_fst,include.rownames=TRUE, floating.environment='sidewaystable', scalebox=max(1-(dim(mat.fst)[1]-15)/50,0.2),add.to.row=list(list(seq(1,nrow(mat.fst),2)),"\\rowcolor[gray]{0.9} ") )
+
+#print(tab_pop_Fst,include.rownames=TRUE,add.to.row=list(list(seq(1,nrow(FST_results),2)),"\\rowcolor[gray]{0.9} "))
+
+@
+
+<<echo=FALSE, results='hide'>>=
+allresults$fst<-list(FSTbyloci=FST_results, FSTpairwise=mat.fst)
+@
+
+
+\FloatBarrier
+\FloatBarrier
+
+\section{Testing for null alleles}
+
+
+<<echo=FALSE, results='hide', message=FALSE>>=
+nullalleles<-null.all(cats)  
+obs.ho<-nullalleles$homozygotes$observed
+boot.ho<-nullalleles$homozygotes$bootstrap
+tot.obs.ho<-nullalleles$homozygotes$overall$observed
+tot.dist.ho<-nullalleles$homozygotes$overall$distribution
+@
+
+\subsection{Comparison of the observed number of homozygotes vs. expected - overall}
+Boxplots show the bootstrap distribution of the expected number of homozygotes for each allele with the boxes showing the 25th (lower edge), 50th (solid line), and 75th (upper edge) percentiles of the distribution and the whiskers showing 1.5 * the inter-quartile range. Solid black dots indicate outliers while red dots indicate the observed number of homozygotes for the allele. If the red dot is above the end of the whisker it suggests that there is an excess of homozygotes for that locus, 
+
+If your results suggest that there is an excess of homozygotes for one (or more) of your loci, you might have a null allele. On the other hand, it could also be incomplete mixing across populations. Try rerunning your analysis by subpopulation or region and see if that resolves the excess of homozygotes. If it doesn't, then you should consider taking more robust measures to check for null alleles. See for instance Girard's (2011) paper on a robust statistical method to detect null alleles.  
+\newline
+\newline The probability of the observed number of homozygotes for each locus is available in the results object using null.all\$homozygotes\$overall
+<<null_all_overall_ho, echo=FALSE, fig.width=7, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi, fig.cap="Number of observed homozygotes at each locus (red dots) compared to the distribution of the expected number of homozygotes assuming HWE (boxplots)">>=
+tot.dist.ho<-reshape2::melt(tot.dist.ho)
+toh <- data.frame(xx=tot.obs.ho)
+print(ggplot(data=tot.dist.ho, aes(x=factor(X2),y=value))+geom_boxplot(fill="grey")+theme_classic()+xlab("Locus")+ylab("Number of homozygotes")+scale_x_discrete(labels=names(cats@loc.n.all))+geom_point(data=toh, aes(x=1:length(xx),y=xx),colour="red",size=3))
+@
+\FloatBarrier
+
+\subsection{Comparison of the observed number of homozygotes vs. expected - by locus}
+Boxplots show the bootstrap distribution of the expected number of homozygotes for each allele with the boxes showing the 25th (lower edge), 50th (solid line), and 75th (upper edge) percentiles of the distribution and the whiskers showing 1.5 * the inter-quartile range. Solid black dots indicate outliers while red dots indicate the observed number of homozygotes for the allele. If the red dot is above the end of the whisker it suggests that there is an excess of homozygotes for that allele. 
+\newline
+\newline The probability of the observed number of homozygotes for each allele is available in the results object using null.all\$homozygotes\$probability.obs
+
+\noindent
+<<null_all, echo=FALSE, fig.width=7, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi>>=
+for (i in 1:length(obs.ho)) {
+  boot.dist<-melt(boot.ho[[i]])
+  obs.val<-as.matrix(obs.ho[[i]],ncol=1)
+  rownames(obs.val)<-seq(1:length(obs.ho[[i]]))
+  obs.val<-melt(t(obs.val))
+  print(
+    ggplot(data=boot.dist,aes(as.factor(X2),value)) +geom_boxplot(fill="lightgrey")+theme_classic()+geom_point(data=obs.val,aes(as.factor(X2),value, colour="red"),size=3)+ylab("Number of homozygotes")+xlab("Allele")+ scale_x_discrete(labels=unname(cats@all.names[[i]]))+ggtitle(locNames(cats)[i])+ theme(legend.position="none")
+  )
+}  
+@
+
+<<echo=FALSE,results='asis'>>=
+tab <-nullalleles$homozygotes$probability.obs
+cap_first<-"Probability of the observed number of homozygotes"
+cap_cont<-"Probability of the observed number of homozygotes (continued)"
+
+
+breaktab(tab, cap_first, cap_cont)
+
+#breaktab <- function(tab, cap_first, cap_cont)
+#{
+#num_tables<-ceiling(dim(tab)[2]/8)
+#for(i in 1:num_tables){
+#  if(i==1) {
+#    tempcap<-cap_first
+#  } else if (i>1) {
+#    tempcap<-cap_cont
+#  }
+#  firstcol<-1+(8*(i-1))
+#  lastcol<-i*8
+#  if(lastcol>dim(tab)[2]) lastcol<-dim(tab)[2]
+#  tempdata2<-as.matrix(tab[,firstcol:lastcol])
+#  if((lastcol-firstcol)==0) colnames(tempdata2)<-colnames(tab)[dim(tab)[2]]
+#  tab2<-xtable(tempdata2,cap=tempcap, digits=3)
+#  print(tab2,include.rownames=TRUE, ,add.to.row=list(list(seq(1,nrow(tab2),2)),"\\rowcolor[gray]{0.9} ")) 
+#}
+#}
+write.csv(nullalleles$homozygotes$probability.obs, paste(cats@other$filename,"-null_allele_probability.csv", sep=""), row.names=TRUE)
+@
+
+\FloatBarrier
+
+\subsection{Frequency of null alleles}
+\subsubsection{Determined using Chakraborty et al. (1992)}
+<<echo=FALSE,results='hide'>>=
+method1.boot<-nullalleles$null.allele.freq$bootstrap$method1
+colnames(method1.boot)<-locNames(cats)
+method1.boot<-melt(method1.boot)
+method1.obs<-melt(nullalleles$null.allele.freq$summary1[1,])
+method1.obs$names <- rownames(method1.obs)
+@
+
+<<null_all_Chakraborty, echo=FALSE, fig.width=7, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi>>=
+
+   ggplot(data=method1.boot,aes(X2,value)) +geom_boxplot(fill="grey")+theme_classic()+geom_point(data=method1.obs,aes(names,value, colour="red"),size=3)+ylab("Frequency of null alleles")+xlab("Locus")+ scale_x_discrete(labels=unname(locNames(cats)))+ggtitle("Null allele frequency - Chakraborty et al. (1992)")+ theme(legend.position="none")+geom_hline(yintercept=0,colour="lightgrey")
+@
+
+<<echo=FALSE,results='hide'>>=
+method1_summary_cap<-"Summary of null allele frequencies by locus for Chakraborty et al. (1992)"
+method1_table<-xtable(nullalleles$null.allele.freq$summary1, cap=method1_summary_cap, digits=3)
+print(method1_table,include.rownames=TRUE)
+write.csv(nullalleles$null.allele.freq$summary2, paste(cats@other$filename,"-null_allele_freq_Chakraborty.csv", sep=""), row.names=TRUE)
+@
+
+
+\subsubsection{Determined using Brookfield (1996)}
+<<echo=FALSE,results='hide'>>=
+method2.boot<-nullalleles$null.allele.freq$bootstrap$method2
+colnames(method2.boot)<-locNames(cats)
+method2.boot<-melt(method2.boot)
+method2.obs<-melt(nullalleles$null.allele.freq$summary2[1,])
+method2.obs$names <- rownames(method2.obs)
+@
+
+<<null_all_Brookfield, echo=FALSE, fig.width=7, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi>>=
+ggplot(data=method2.boot,aes(X2,value)) +geom_boxplot(fill="grey")+theme_classic()+geom_point(data=method2.obs,aes(names,colour="red",size=3))+ylab("Frequency of null alleles")+xlab("Locus")+ scale_x_discrete(labels=unname(locNames(cats)))+ggtitle("Null allele frequency - Brookfield (1996)")+ theme(legend.position="none")+geom_hline(yintercept=0,colour="lightgrey")
+@
+
+
+<<echo=FALSE,results='asis'>>=
+method2_summary_cap<-"Summary of null allele frequencies by locus for Brookfield (1996)"
+method2_table<-xtable(nullalleles$null.allele.freq$summary2, cap=method2_summary_cap, digits=3)
+print(method2_table,include.rownames=TRUE)
+write.csv(nullalleles$null.allele.freq$summary2, paste(cats@other$filename,"-null_allele_freq_Brookfield.csv", sep=""), row.names=TRUE)
+@
+
+\FloatBarrier
+<<echo=FALSE, results='hide'>>=
+allresults$null.all<-list(nullalleles)
+@
+\FloatBarrier
+
+
+\section{Allelic richness}
+<<echo=FALSE,results='asis'>>=
+ar <- allel.rich(cats)
+@
+
+
+Allelic richness for each locus and subpopulation was based on a subsample of {\Sexpr{ar$alleles.sampled}} alleles.
+
+<<echo=FALSE,results='asis'>>=
+main_cap_first<-"Allelic richness by locus and population"
+ar_main_cap_cont<-"Allelic richness by locus and population (continued)"
+tab <- ar$all.richness
+breaktab(tab, main_cap_first, ar_main_cap_cont)
+write.csv(ar$all.richness, paste(cats@other$filename,"-allelic_richness.csv", sep=""), row.names=TRUE)
+sum_ar<-rbind(ar$mean.richness,ar$sum.richness)
+rownames(sum_ar)<-c("Mean richness","Total richness")
+
+tab<- sum_ar
+cap_first<-"Allelic richness summary statistics"
+cap_cont<-"Allelic richness summary statistics (continued)"
+breaktab(tab, cap_first, cap_cont)
+
+write.csv(sum_ar, paste(cats@other$filename,"-summary_allelic_richness.csv", sep=""), row.names=TRUE)
+
+@
+
+<<echo=FALSE, results='hide'>>=
+allresults$allel.rich<-list(ar)
+@
+
+\FloatBarrier
+
+
+\section{Hs and Ht based population differentiation statistics}
+
+<<echo=FALSE, results='hide'>>=
+# fixed error in harmonic mean due to low sample size!!!!
+# pgrharmonic_mean<-    function (x) 
+# {
+#     if (sum(is.na(x)>0)) return(NA) else
+#     {
+#     if (!all(x >= 0)) {
+#         return(NA)
+#     }
+#     return(1/mean(1/x))
+#     }
+# }
+#  reassignInPackage("harmonic_mean", pkgName="mmod", pgrharmonic_mean)
+
+differentiate<-diff_stats(cats)
+difftitle1<-"Hs and Ht based estimates of differentiation: Gst, Gst and Dest for each locus"
+difftitle2<-"Hs and Ht based global estimates of differentiation: Gst, Gst and Dest for each locus"
+diffglobmat<-matrix(NA,nrow=1,ncol=length(differentiate$global))
+diffglobmat[1,]<-differentiate$global
+colnames(diffglobmat)<-names(differentiate$global)
+diffbylocus<-xtable(differentiate$per.locus, cap=difftitle1, digits=3)
+diffglobal<-xtable(diffglobmat, cap=difftitle2, digits=3)
+write.csv(differentiate$per.locus, paste(cats@other$filename,"-differentiate_by_loc.csv", sep=""), row.names=TRUE)
+write.csv(diffglobmat, paste(cats@other$filename,"-differentiate_global.csv", sep=""), row.names=TRUE)
+@
+
+<<echo=FALSE,results='asis'>>=
+print(diffbylocus,include.rownames=TRUE, ,add.to.row=list(list(seq(1,nrow(differentiate$per.locus),2)),"\\rowcolor[gray]{0.9} "))
+print(diffglobal,include.rownames=FALSE, ,add.to.row=list(list(seq(1,nrow(diffglobmat),2)),"\\rowcolor[gray]{0.9} "))
+@
+
+<<echo=FALSE,results='hide'>>=
+
+
+pairwise_D2 <- 
+function (x, linearized = FALSE) 
+{
+    pops <- seppop(x)
+    n.pops <- length(pops)
+    allP <- utils::combn(1:n.pops, 2)
+    pair <- function(index.a, index.b) {
+        a <- pops[[index.a]]
+        b <- pops[[index.b]]
+        temp <- repool(a, b)
+        return(D_Jost(temp)$global.het)
+    }
+    res <- sapply(1:dim(allP)[2], function(i) pair(allP[, i][1], 
+        allP[, i][2]))
+    attributes(res) <- list(class = "dist", Diag = FALSE, Upper = FALSE, 
+        Labels = popNames(x), Size = n.pops)
+    if (linearized) {
+        return(res/(1 - res))
+    }
+    else (return(res))
+}
+
+pairwise_Gst_Hedrick2 <-
+function (x, linearized = FALSE) 
+{
+    pops <- seppop(x)
+    n.pops <- length(pops)
+    allP <- utils::combn(1:n.pops, 2)
+    pair <- function(index.a, index.b) {
+        a <- pops[[index.a]]
+        b <- pops[[index.b]]
+        temp <- repool(a, b)
+        return(Gst_Hedrick(temp)$global)
+    }
+    res <- sapply(1:dim(allP)[2], function(i) pair(allP[, i][1], 
+        allP[, i][2]))
+    attributes(res) <- list(class = "dist", Diag = FALSE, Upper = FALSE, 
+        Labels = popNames(x), Size = n.pops)
+    if (linearized) {
+        return(res/(1 - res))
+    }
+    return(res)
+}
+
+pairwise_Gst_Nei2 <-
+function (x, linearized = FALSE) 
+{
+    pops <- seppop(x)
+    n.pops <- length(pops)
+    allP <- utils::combn(1:n.pops, 2)
+    pair <- function(index.a, index.b) {
+        a <- pops[[index.a]]
+        b <- pops[[index.b]]
+        temp <- repool(a, b)
+        return(Gst_Nei(temp)$global)
+    }
+    res <- sapply(1:dim(allP)[2], function(i) pair(allP[, i][1], 
+        allP[, i][2]))
+    attributes(res) <- list(class = "dist", Diag = FALSE, Upper = FALSE, 
+        Labels = popNames(x), Size = n.pops)
+    if (linearized) {
+        return(res/(1 - res))
+    }
+    return(res)
+}
+
+if (length(levels(cats@pop))>2){
+  pairD<-pairwise_D2(cats)
+  pairDmat<-as.matrix(pairD)
+  pairDmat[upper.tri(pairDmat,diag=TRUE)]<-NA
+  colnames(pairDmat)<-popNames(cats)
+  rownames(pairDmat)<-popNames(cats)
+ # pairDmat<-pairDmat[-1,]
+
+  pairGstH<-pairwise_Gst_Hedrick2(cats)
+  pairGstHmat<-as.matrix(pairGstH)
+  pairGstHmat[upper.tri(pairGstHmat,diag=TRUE)]<-NA
+  colnames(pairGstHmat)<-popNames(cats)
+  rownames(pairGstHmat)<-popNames(cats)
+ # pairGstHmat<-pairGstHmat[-1,]
+
+
+  pairGstN<-pairwise_Gst_Nei2(cats)
+  pairGstNmat<-as.matrix(pairGstN)
+  pairGstNmat[upper.tri(pairGstNmat,diag=TRUE)]<-NA
+  colnames(pairGstNmat)<-popNames(cats)
+  rownames(pairGstNmat)<-popNames(cats)
+ # pairGstNmat<-pairGstNmat[-1,]
+
+  pairdiff1<-"mmod Jost's D pairwise"
+  pairdiff2<-"Pairwise Gst - Hedrick"
+  pairdiff3<-"Pairwise Gst - Nei"
+
+  pairDtab<-xtable(pairDmat, cap=pairdiff1, digits=3)
+  pairGstHtab<-xtable(pairGstHmat, cap=pairdiff2, digits=3)
+  pairGstNtab<-xtable(pairGstNmat, cap=pairdiff3, digits=3)
+  write.csv(pairDmat, paste(cats@other$filename,"-pairwise_JostD.csv", sep=""), row.names=TRUE)
+  write.csv(pairGstHmat, paste(cats@other$filename,"-pairwise_Gst_Hedricks.csv", sep=""), row.names=TRUE)
+  write.csv(pairGstNmat, paste(cats@other$filename,"-pairwise_Gst_Nei.csv", sep=""), row.names=TRUE)
+}
+@
+
+
+<<echo=FALSE,results='asis'>>=
+if (length(levels(cats@pop))>2){
+
+if (dim(pairDmat)[1]<13)   print(pairDtab,include.rownames=TRUE)  else
+  print(pairDtab,include.rownames=TRUE, floating.environment='sidewaystable', scalebox=max(1-(dim(pairDmat)[1]-15)/50,0.2))
+
+if (dim(pairGstHmat)[1]<13)   print(pairGstHtab,include.rownames=TRUE)  else
+  print(pairGstHtab,include.rownames=TRUE, floating.environment='sidewaystable', scalebox=max(1-(dim(pairGstHmat)[1]-15)/50,0.2))
+
+if (dim(pairGstNmat)[1]<13)   print(pairGstNtab,include.rownames=TRUE)  else
+  print(pairGstNtab,include.rownames=TRUE, floating.environment='sidewaystable', scalebox=max(1-(dim(pairGstNmat)[1]-15)/50,0.2))
+  
+#  print(pairDtab,include.rownames=TRUE)
+ # print(pairGstHtab,include.rownames=TRUE)
+ # print(pairGstNtab,include.rownames=TRUE)
+}
+@
+
+
+<<echo=FALSE, results='hide'>>=
+if (length(levels(cats@pop))>2){
+allresults$differ.stats<-list(HsHt=differentiate,pairwise.D=pairDmat, pairwise.GstH=pairGstH, pairwise.GstN=pairGstN)
+}
+@
+
+\FloatBarrier
+\section{Testing for HWE for each combination of location and locus}
+
+
+\subsection{Testing HWE for each combination of location and locus}
+
+<<echo=FALSE, results='hide', warning=FALSE>>=
+# see if there is a significant departure from HWE for each popxloc
+# redoing this section as the function seems to have changed...
+
+# reorder dataset to calculate HWE without errors...
+tempcats<-cats
+reorderalleles<-rep(NA,dim(tempcats@tab)[2])
+tempcounter<-0
+for (i in 1:length(tempcats@all.names)){
+  #message("i = ",i," tempcounter = ",tempcounter)
+  templocorder<-order(tempcats@all.names[[i]])
+  reorderalleles[(tempcounter+1):(length(templocorder)+tempcounter)]<-order(tempcats@all.names[[i]])+tempcounter
+  tempcats@all.names[[i]]<-tempcats@all.names[[i]][templocorder]
+  tempcounter<-tempcounter+length(templocorder)
+}
+tempcats@tab<-tempcats@tab[,reorderalleles]
+popcatstemp<-seppop(tempcats)
+
+if(length(popcatstemp)>=length(tempcats@loc.n.all)){
+  pvalhwe<-as.data.frame(matrix(NA,nrow=length(popcatstemp),ncol=length(tempcats@loc.n.all)))
+  for(i in 1:length(popcatstemp)){
+    temphwevals<-hw.test(popcatstemp[[i]])
+    pvalhwe[i,]<-temphwevals[,4]
+  }
+  colnames(pvalhwe)<-names(tempcats@loc.n.all)
+  rownames(pvalhwe)<-popNames(tempcats)
+} else if(length(popcatstemp)<length(tempcats@loc.n.all)){
+  pvalhwe<-matrix(NA,nrow=length(tempcats@loc.n.all),ncol=length(popcatstemp))
+  for(i in 1:length(popcatstemp)){
+    temphwevals<-hw.test(popcatstemp[[i]])
+    pvalhwe[,i]<-temphwevals[,4]
+  }
+  rownames(pvalhwe)<-names(tempcats@loc.n.all)
+  colnames(pvalhwe)<-popNames(tempcats)
+}
+
+testhw<-round(pvalhwe,digits=4)
+denom<-dim(testhw)[1]*dim(testhw)[2]
+
+
+write.csv(testhw, paste(cats@other$filename,"-HWE_by_locus_location.csv", sep=""), row.names=TRUE)
+pop_hwe_table<-xtable(testhw,caption="Chi-square test of HWE p-values for each combination of location and locus",digits=3)
+@
+
+\noindent
+The table below shows the p-value for the test of HWE for each combination of location and locus. The p-values shown here differ from those produced by GENALEX as the Chi-square test performed here includes the Yates continuity correction which GENALEX does not. As a large number of Chi-square tests are performed, $\alpha$ = 0.05  cannot be used as Type I errors are likely to occur. Instead a Bonferroni adjustment is used $\alpha$ = (0.05/ \Sexpr{denom}) = \Sexpr{round(0.05/denom,digits=5)}.
+
+<<echo=FALSE,results='asis'>>=
+print(pop_hwe_table,include.rownames=TRUE, add.to.row=list(list(seq(1,nrow(testhw),2)),"\\rowcolor[gray]{0.9} "))
+@
+
+
+
+
+
+\FloatBarrier
+
+\subsection{Combinations of location and locus that depart from HWE}
+
+<<echo=FALSE,results='asis'>>=
+# determine which combinations of location and locus are significant compared to Bonferroni corrected alpha.
+idx<-which(testhw<(0.05/denom),TRUE)
+if (dim(idx)[1]>0) {
+  row.names(idx)<-NULL
+  idx<-as.data.frame(idx)
+  sig_hwe<-data.frame(col1=popNames(cats)[idx$row],col2=locNames(cats)[idx$col],col3=testhw[cbind(idx$row,idx$col)],row.names=NULL)
+  colnames(sig_hwe)<-c("Population","Locus","p-value")
+  ordered_sig_hwe<-sig_hwe[order(sig_hwe$Locus,sig_hwe$Population),]
+  numrows<-dim(ordered_sig_hwe)[1]
+  write.csv(sig_hwe, paste(cats@other$filename,"-sig_depart_HWE.csv", sep=""))
+  # makes life easier if the number of rows is even
+  if ((numrows%%2) == 1) {
+    ordered_sig_hwe<-rbind(ordered_sig_hwe,c(NA,NA,NA))
+    numrows<-dim(ordered_sig_hwe)[1]
+  }
+  # if more than 116 rows, this table will be spread over multiple pages
+  pages<-numrows %/% 116
+  partialpage<-numrows %% 116
+  if (partialpage!=0) pages<-pages+1
+  for (i in 1:pages){
+    pglinemin<-(1 + (i-1)*116)
+    pglinemax<-(i*116)
+    pagerows<-pglinemax-pglinemin+1
+    firstmax<-pglinemin+pagerows/2-1
+    second1<-firstmax+1 # first obs, 2nd column
+    if (numrows<=pglinemax){ #i.e. this is the last page
+      pglinemax<-numrows
+      pagerows<-pglinemax-pglinemin+1
+      halfcol<-pagerows/2
+      firstmax<-pglinemin+halfcol-1
+      second1<-firstmax+1
+      temp <- cbind(as.data.frame(ordered_sig_hwe$Population[pglinemin:firstmax]), as.data.frame(ordered_sig_hwe$Locus[pglinemin:firstmax]), as.data.frame(ordered_sig_hwe$"p-value"[pglinemin:firstmax]), as.data.frame(ordered_sig_hwe$Population[second1:pglinemax]), as.data.frame(ordered_sig_hwe$Locus[second1:pglinemax]), as.data.frame(ordered_sig_hwe$"p-value"[second1:pglinemax]))
+    } else {
+      temp <- cbind(as.data.frame(ordered_sig_hwe$Population[pglinemin:firstmax]), as.data.frame(ordered_sig_hwe$Locus[pglinemin:firstmax]), as.data.frame(ordered_sig_hwe$"p-value"[pglinemin:firstmax]), as.data.frame(ordered_sig_hwe$Population[second1:pglinemax]), as.data.frame(ordered_sig_hwe$Locus[second1:pglinemax]), as.data.frame(ordered_sig_hwe$"p-value"[second1:pglinemax]))
+    }
+    colnames(temp)<-c("Population","Locus","p-value","Population ","Location ","p-value ")  
+    captext<-cat("Combinations of locus and location that depart from HWE. Table",i,"of \n",pages,sep=" ")
+    tab_ord_sig_hwe<-xtable(temp,caption=cat("Combinations of locus and location that depart from HWE. Table",i,"of",pages,sep=" "),digits=4)
+  }
+  print(tab_ord_sig_hwe,include.rownames=FALSE, add.to.row=list(list(seq(1,nrow(temp),2)),"\\rowcolor[gray]{0.9} "))
+} else if(dim(idx)[1]==0) {
+  cat("There were no departures from HWE for any combination of sub-population and locus")
+  temp<-NA
+} else {
+  cat("A negative number was produced for the number of departures from HWE. Something isn't working right...")
+  temp<-NA
+}
+@
+
+
+<<echo=FALSE, results='hide'>>=
+allresults$hwe<-list(HWEchisq=testhw, departures=temp)
+@
+\FloatBarrier
+\section{Principal Coordinate Analysis}
+
+Principal coordinate analysis. This plot, using the first two axes, visualises genetic diversity among sampled individuals. Missing data are replaced by the mean of the allele frequencies.
+Colors indicate subpopulation if specified in the genetic data set.
+<<echo=FALSE,results='hide'>>=
+scale.cats <- scaleGen(cats, NA.method="mean")
+pca.cats <- dudi.pca(scale.cats, cent=FALSE, scale=FALSE, scannf=FALSE, nf=3)
+
+cols <- rainbow(length(levels(pop(cats))))
+# add results from this section to allresults list
+allresults$pcoa<-list(pca.cats)
+
+@
+
+<<pcoa,  echo=FALSE, fig.width=6, fig.height=4, fig.path=fig.path, dev=dev, dpi=dpi >>=
+s.class(pca.cats$li, pop(cats),xax=1,yax=2, col=transp(cols,.5), axesell=FALSE, cpoint=2, csub=2 )
+#title("PCA axes 1-2")
+add.scatter.eig(pca.cats$eig, nf=3, xax=1, yax=2)
+@
+
+\FloatBarrier
+\end{document}
