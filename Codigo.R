@@ -88,4 +88,52 @@ dev.off()
 
 
 
+##### ESTIMANDO RELADTENESS 2 DIC 2022
+library(related)
+library(ggplot2)
+library(adegenet)
+library(hierfstat)
+library(genepop)
+library(Relatedness)
+library(related)
+#
 
+##Va comandos para C. moschata, es igual para los demás juegos de datos
+setwd("/home/anahi/Escritorio/GeneticaPoblacionesUNAM/PROYECTO_FINAL/")
+#Estimando el coeficiente de endogamia
+Ceratitis.ind <- read.genepop("Datos_Anahi_genepop.gen",ncode=3L)
+Ceratitis.ind$tab
+Ceratitis.ind.ss <- basic.stats(Ceratitis.ind)
+Ceratitis.ind.ss
+
+#Usando el paquete genepop estima FIS y su prueba ad-hoc de
+#significancia.
+test_HW("Datos_Anahi_genepop.gen",which="global deficit")
+
+#Para el argumento “which” usa “global excess” o “global deficit” de
+#acuerdo a los resultados de diversidad. Recuerda que los resultados
+#quedan en el directorio de trabajo.
+data(GenotypeData)
+input <- readgenotypedata(GenotypeData)
+str(input)
+##Relatedness
+#Ahora el grado de relatedness entre los individuos
+#este paquete le gusta loc archivos csv
+# Ceratitis <- read.table("Ceratitischata.csv", sep = ",")
+#Ceratitis.wa <- coancestry(Ceratitis.DATA, wang = 1)
+
+#Por ahora solo vamoms a estimar Wang
+Ceratitis.DATA <- read.table( "Ceratitis.csv" , header = FALSE , sep = "," , stringsAsFactors = FALSE )
+ncol(Ceratitis.DATA)
+POB13 <- subset(Ceratitis.DATA, V2== "POB13")
+POB13 <- POB13[,2:18]
+input <- readgenotypedata(POB13)
+input$gdata
+Ceratitis.wa <- coancestry(input$gdata, wang = 1)
+Ceratitis.wa.rel <-Ceratitis.wa$relatedness[,c(2,3,6)]
+
+#Proporción de relatedness
+png("Pie_Ceratitis.png")
+pie(c(sum(Ceratitis.wa.rel$wang<0.0625),sum(Ceratitis.wa.rel$wang>0.0625 & Ceratitis.wa.rel$wang<0.125),sum(Ceratitis.wa.rel$wang>0.125 & Ceratitis.wa.rel$wang<0.25),sum(Ceratitis.wa.rel$wang>0.25 & Ceratitis.wa.rel$wang<0.5),sum(Ceratitis.wa.rel$wang>0.5)),labels=c("Unrelated","Third Order","Second Order","Full-sib/P-O","Twin-Clone"),col=c("gray","green4","steelblue","orange","darkred"),main="Ceratiti", )
+dev.off()
+#
